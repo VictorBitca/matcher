@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 const targetFiles = ".wav"
@@ -16,6 +18,12 @@ const minBitDistance = 8 // hamming distance
 const minLength = 5      // min common region to be validated (seconds)
 
 var results map[string]SearchResult
+var start time.Time
+var waitgroup sync.WaitGroup
+
+func init() {
+	start = time.Now()
+}
 
 func main() {
 	results = make(map[string]SearchResult)
@@ -25,13 +33,17 @@ func main() {
 	allFiles := listAllFiles()
 	pairs := pairUpFiles(allFiles)
 
-	for _, value := range pairs {
+	for _, pair := range pairs {
 		fmt.Print(".")
-		analyse(value)
+		waitgroup.Add(1)
+		go analyse(pair, &waitgroup)
 	}
+
+	waitgroup.Wait()
 
 	printSuccessfulResults()
 	printFailedResults(allFiles)
+	fmt.Println(time.Since(start))
 }
 
 func listAllFiles() []string {

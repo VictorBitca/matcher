@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"sort"
+	"sync"
 
 	"github.com/go-fingerprint/fingerprint"
 	"github.com/go-fingerprint/gochroma"
@@ -23,7 +24,7 @@ type WorkPair struct {
 }
 
 // Analyses the input then writes the results in the global result variable
-func analyse(pair WorkPair) {
+func analyse(pair WorkPair, waitgroup *sync.WaitGroup) {
 	audio1, err1 := ioutil.ReadFile(pair.first)
 	audio2, err2 := ioutil.ReadFile(pair.second)
 
@@ -43,6 +44,8 @@ func analyse(pair WorkPair) {
 		saveResult(r1)
 		saveResult(r2)
 	}
+
+	waitgroup.Done()
 }
 
 func searchIntro(audio1 []byte, audio2 []byte, fpcalc *gochroma.Printer) (float64, float64, float64, float64, error) {
