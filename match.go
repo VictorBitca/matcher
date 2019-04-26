@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"sort"
-	"sync"
 
 	"github.com/go-fingerprint/fingerprint"
 	"github.com/go-fingerprint/gochroma"
@@ -24,31 +22,29 @@ type WorkPair struct {
 }
 
 // Analyses the input then writes the results in the global result variable
-func analyse(pair WorkPair, waitgroup *sync.WaitGroup) {
-	audio1, err1 := ioutil.ReadFile(pair.first)
-	audio2, err2 := ioutil.ReadFile(pair.second)
+func analyse(input chan WorkPair, output chan SearchResult) {
+	for job := range input {
+		audio1, err1 := ioutil.ReadFile(job.first)
+		audio2, err2 := ioutil.ReadFile(job.second)
 
-	if err1 != nil || err2 != nil {
-		log.Fatal(err1, err2)
+		if err1 != nil || err2 != nil {
+			log.Fatal(err1, err2)
+		}
+
+		fpcalc := gochroma.New(gochroma.AlgorithmDefault)
+		defer fpcalc.Close()
+
+		p1start, p1end, p2start, p2end := searchIntro(trimHeader(audio1), trimHeader(audio2), fpcalc)
+
+		r1 := SearchResult{name: job.first, start: p1start, end: p1end}
+		r2 := SearchResult{name: job.second, start: p2start, end: p2end}
+
+		output <- r1
+		output <- r2
 	}
-
-	fpcalc := gochroma.New(gochroma.AlgorithmDefault)
-	defer fpcalc.Close()
-
-	p1start, p1end, p2start, p2end, e := searchIntro(trimHeader(audio1), trimHeader(audio2), fpcalc)
-
-	if e == nil {
-		r1 := SearchResult{name: pair.first, start: p1start, end: p1end}
-		r2 := SearchResult{name: pair.second, start: p2start, end: p2end}
-
-		saveResult(r1)
-		saveResult(r2)
-	}
-
-	waitgroup.Done()
 }
 
-func searchIntro(audio1 []byte, audio2 []byte, fpcalc *gochroma.Printer) (float64, float64, float64, float64, error) {
+func searchIntro(audio1 []byte, audio2 []byte, fpcalc *gochroma.Printer) (float64, float64, float64, float64) {
 	// Trim byte slices
 	trimmedData1 := trim(audio1, inputSize, 0)
 	trimmedData2 := trim(audio2, inputSize, 0)
@@ -78,7 +74,7 @@ func searchIntro(audio1 []byte, audio2 []byte, fpcalc *gochroma.Printer) (float6
 	// Find the contigious region
 	start, end := findContiguousRegion(hammed, minBitDistance)
 	if start < 0 || end < 0 {
-		return 0.0, 0.0, 0.0, 0.0, errors.New("No common regions found")
+		return 0.0, 0.0, 0.0, 0.0
 	}
 
 	//Convert everything to seconds
@@ -109,10 +105,10 @@ func searchIntro(audio1 []byte, audio2 []byte, fpcalc *gochroma.Printer) (float6
 
 	// Check if the found region is bigger than min length
 	if firstFileRegionEnd-firstFileRegionStart < minLength {
-		return 0.0, 0.0, 0.0, 0.0, errors.New("No significant common regions found")
+		return -1.0, -1.0, -1.0, -1.0
 	}
 
-	return firstFileRegionStart, firstFileRegionEnd, secondFileRegionStart, secondFileRegionEnd, nil
+	return firstFileRegionStart, firstFileRegionEnd, secondFileRegionStart, secondFileRegionEnd
 }
 
 // Get fingerprints as a slices of 32-bit integers
@@ -242,20 +238,6 @@ func nextOnesAreAlsoSmall(arr []int, index int, upperLimit int) bool {
 	}
 
 	return false
-}
-
-// Writes the result in the global resuls variable
-func saveResult(result SearchResult) {
-	if results[result.name].name != "" {
-		if results[result.name].start > result.start {
-			results[result.name] = SearchResult{name: result.name, start: result.start, end: results[result.name].end}
-		}
-		if results[result.name].end < result.end {
-			results[result.name] = SearchResult{name: result.name, start: results[result.name].start, end: result.end}
-		}
-	} else {
-		results[result.name] = result
-	}
 }
 
 func printSuccessfulResults() {

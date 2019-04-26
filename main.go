@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -17,15 +16,21 @@ const sampleRate = 48000 // sample rate of input files
 const minBitDistance = 8 // hamming distance
 const minLength = 5      // min common region to be validated (seconds)
 
+const maxWorkers = 5 // max paralel workers
+
 var results map[string]SearchResult
 var start time.Time
-var waitgroup sync.WaitGroup
+
+var jobs chan WorkPair
+var output chan SearchResult
 
 func init() {
 	start = time.Now()
 }
 
 func main() {
+	jobs = make(chan WorkPair, 30)
+	output = make(chan SearchResult, 30)
 	results = make(map[string]SearchResult)
 
 	fmt.Printf("Search range: 0..%v seconds  \n", inputSize)
@@ -33,17 +38,23 @@ func main() {
 	allFiles := listAllFiles()
 	pairs := pairUpFiles(allFiles)
 
-	for _, pair := range pairs {
-		fmt.Print(".")
-		waitgroup.Add(1)
-		go analyse(pair, &waitgroup)
+	for index := 0; index < maxWorkers; index++ {
+		go analyse(jobs, output)
 	}
 
-	waitgroup.Wait()
+	for _, pair := range pairs {
+		fmt.Print(".")
+		jobs <- pair
+	}
+	close(jobs)
+
+	for r := 0; r < len(allFiles)*2-2; r++ {
+		saveResult(<-output)
+	}
 
 	printSuccessfulResults()
 	printFailedResults(allFiles)
-	fmt.Println(time.Since(start))
+	fmt.Println("Finished in: ", time.Since(start))
 }
 
 func listAllFiles() []string {
